@@ -1,0 +1,78 @@
+apiVersion: tekton.dev/v1beta1
+kind: PipelineRun
+metadata:
+  name: meta
+spec:
+  pipelineSpec:
+    tasks:
+    - name: meta
+      taskSpec:
+        volumes:
+        - name: maven-settings
+          secret:
+            secretName: drivenow-maven-settings
+        - name: maven-repo
+          persistentVolumeClaim:
+            claimName: maven-repo-local-cache
+            
+        stepTemplate:
+          volumeMounts:
+          - name: maven-settings
+            mountPath: /root/.m2
+            key: settings.xml
+            optional: true
+          - name: maven-repo
+            mountPath: /root/.m2/repository
+          workingDir: /workspace/source
+
+        steps:
+
+        - image: gcr.io/jenkinsxio/jx-boot
+          name: jx-variables
+          resources: {}
+          script: |
+            #!/usr/bin/env sh
+            jx gitops variables
+
+        - image: gcr.io/jenkinsxio/jx-boot
+          name: helm-verify
+          resources: {}
+          script: |
+            #!/usr/bin/env sh
+            source .jx/variables.sh
+            jx gitops helm release --no-release
+
+
+
+        - image: maven:3.6-openjdk-11
+          name: maven-set-version
+          resources: {}
+          script: |
+            #!/bin/bash
+            source .jx/variables.sh
+            mvn -Dmaven.artifact.threads=10 --batch-mode versions:set -DnewVersion=$VERSION
+
+
+        - image: alpine/git
+          name: git-json
+          script: |
+            #!/usr/bin/env sh
+            source .jx/variables.sh
+
+            set -x -e
+            git log --pretty=format:'{%n  "commit": "%H",%n  "abbreviated_commit": "%h",%n  "tree": "%T",%n  "abbreviated_tree": "%t",%n  "parent": "%P",%n  "abbreviated_parent": "%p",%n  "refs": "%D",%n  "encoding": "%e",%n  "subject": "%s",%n  "sanitized_subject_line": "%f",%n  "commit_notes": "%N",%n  "verification_flag": "%G?",%n  "signer": "%GS",%n  "signer_key": "%GK",%n  "author": {%n    "name": "%aN",%n    "email": "%aE",%n    "date": "%aD"%n  },%n  "commiter": {%n    "name": "%cN",%n    "email": "%cE",%n    "date": "%cD"%n  }%n}' -n 1 > "git.json"
+            touch -t 200001010000.00 "$GIT_JSON"
+            cat "$GIT_JSON"
+
+
+        - image: maven:3.6-jdk-11
+          name: maven-jib
+          script: |
+            #!/bin/bash
+            source .jx/variables.sh
+            set -e
+            mvn -U -Dmaven.artifact.threads=10 --batch-mode \
+              -Dmaven.test.skip=true \
+              -Dimage="$DOCKER_REGISTRY/$DOCKER_REGISTRY_ORG/$APP_NAME:$VERSION"\
+              compile \
+              com.google.cloud.tools:jib-maven-plugin:build
