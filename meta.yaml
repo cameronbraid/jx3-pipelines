@@ -64,9 +64,15 @@ spec:
             touch -t 200001010000.00 "$GIT_JSON"
             cat "$GIT_JSON"
 
+        - image: maven:3.6-openjdk-11
+          name: maven-test
+          script: |
+            #!/bin/sh
+            source .jx/variables.sh
+            mvn test
 
         - image: maven:3.6-jdk-11
-          name: maven-jib
+          name: maven-jib-build
           script: |
             #!/bin/bash
             source .jx/variables.sh
